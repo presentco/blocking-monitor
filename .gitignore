@@ -1,0 +1,19 @@
+# General
+.DS_Store
+*.diff
+*.patch
+
+# Java
+java/build/
+java/classes/
+target/
+.idea/
+*.iml
+
+# Vim
+*.swp
+
+# emacs
+[#]*
+.[#]*
+*~
