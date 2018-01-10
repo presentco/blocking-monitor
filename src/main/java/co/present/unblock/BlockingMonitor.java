@@ -208,6 +208,7 @@ class BlockingMonitor {
 
     private void checkDone() {
       BlockingMonitor monitor = localMonitor.get();
+      if (monitor == null) return;
       monitor.totalCalls++;
       if (!isDone()) {
         if (monitor.disabled) {
