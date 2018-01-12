@@ -1,8 +1,7 @@
 package co.present.unblock;
 
+import com.google.apphosting.api.ApiProxy;
 import com.google.common.base.Preconditions;
-import java.lang.reflect.Proxy;
-import java.util.concurrent.Future;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
 
@@ -22,19 +21,15 @@ public class Unblock {
 
   private Unblock() {}
 
-  /**
-   * Proxies an interface and intercepts methods that return {@link Future}. If your code calls
-   * {@link Future#get()} on one of the returned futures and the value isn't ready yet, Unblock
-   * registers a blocking operation. If the number of blocking operations exceeds the threshold,
-   * Unblock logs an error at the end of the request.
-   */
-  public static <T> T proxy(Class<T> type, T service) {
-    Preconditions.checkArgument(type.isInterface());
-    return type.cast(Proxy.newProxyInstance(
-        BlockingMonitor.class.getClassLoader(),
-        new Class[] { type },
-        new BlockingMonitor.MonitoringInvocationHandler(service)
-    ));
+  private static boolean installed;
+
+  /** Installs the monitor for App Engine. */
+  public static void install() {
+    Preconditions.checkState(!installed, "Already installed");
+    @SuppressWarnings("unchecked")
+    ApiProxy.Delegate<ApiProxy.Environment> delegate = ApiProxy.getDelegate();
+    ApiProxy.setDelegate(new ApiProxyMonitor(delegate));
+    installed = true;
   }
 
   /**

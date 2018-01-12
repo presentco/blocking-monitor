@@ -4,8 +4,6 @@ import com.google.common.collect.HashMultiset;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Multisets;
 import com.google.common.util.concurrent.ForwardingFuture;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -82,7 +80,7 @@ class BlockingMonitor {
           int count = entry.getCount();
           BlockedCall call = entry.getElement();
           builder.append("Result of ")
-              .append(call.signature())
+              .append(call.method)
               .append(" blocked ")
               .append(count)
               .append(count == 1 ? " time" : " times")
@@ -104,35 +102,14 @@ class BlockingMonitor {
 
   static final ThreadLocal<BlockingMonitor> localMonitor = new ThreadLocal<>();
 
-  static class MonitoringInvocationHandler implements InvocationHandler {
-
-    private final Object delegate;
-
-    MonitoringInvocationHandler(Object delegate) {
-      this.delegate = delegate;
-    }
-
-    @Override public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-      Object result = method.invoke(delegate, args);
-      if (result instanceof Future<?>) {
-        return new MonitoringFuture<>((Future<?>) result, method);
-      }
-      return result;
-    }
-  }
-
   private static class BlockedCall {
 
-    private final Method method;
+    private final String method;
     private final Throwable throwable;
 
-    private BlockedCall(Method method, Throwable throwable) {
+    private BlockedCall(String method, Throwable throwable) {
       this.method = method;
       this.throwable = throwable;
-    }
-
-    private String signature() {
-      return method.getDeclaringClass().getSimpleName() + "." + method.getName() + "()";
     }
 
     private List<String> stack;
@@ -165,9 +142,8 @@ class BlockingMonitor {
     int skip = 0;
     while (skip < full.length) {
       String clazz = full[skip].getClassName();
-      if (clazz.startsWith("co.present.unblock") // this package
-          || clazz.startsWith("com.sun") // our proxy
-          || clazz.startsWith("com.google.common.collect") // used by Objectify
+      if (clazz.startsWith("co.present.unblock")
+          || clazz.startsWith("com.google")
           || clazz.startsWith("com.googlecode.objectify")) {
         skip++;
       } else {
@@ -181,12 +157,12 @@ class BlockingMonitor {
         .collect(Collectors.toList());
   }
 
-  private static class MonitoringFuture<T> extends ForwardingFuture<T> {
+  static class MonitoringFuture<T> extends ForwardingFuture<T> {
 
     private final Future<T> delegate;
-    private final Method method;
+    private final String method;
 
-    private MonitoringFuture(Future<T> delegate, Method method) {
+    MonitoringFuture(Future<T> delegate, String method) {
       this.delegate = delegate;
       this.method = method;
     }

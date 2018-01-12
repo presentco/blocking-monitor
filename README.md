@@ -6,36 +6,33 @@ developers should parallelize remote operations
 an App Engine app can tell you noticing blocking operations before they become a problem is hard
 enough, let alone pinpointing and fixing them.
 
-*Present Unblock* proxies remote services (like Google Cloud Datastore) and logs an error when the 
-number of blocking calls exceeds the threshold during a request. Unblock surfaces problems early
-(at development time) and even points you to the code most likely at fault!
+*Present Unblock* intercepts remote services (like Google Cloud Datastore) and logs an error when 
+the number of blocking calls exceeds the threshold during a request. Unblock surfaces problems 
+early (at development time) and even points you to the code most likely at fault!
 
 For example, if the number of remote calls that block during a request exceeds the threshold,
 Unblock will log a message like this:
 
 ```
 SEVERE: 12 of 12 (100%) async calls blocked in 'Example'.
-Result of Foo.b() blocked 8 times
-	at co.present.LogExample.lambda$main$0(LogExample.java:17)
-	at co.present.LogExample$$Lambda$1/122883338.run(Unknown Source)
-	at co.present.unblock.Unblock.monitor(Unblock.java:48)
-	at co.present.LogExample.main(LogExample.java:13)
-Result of Foo.a() blocked 4 times
-	at co.present.LogExample.lambda$main$0(LogExample.java:16)
-	at co.present.LogExample$$Lambda$1/122883338.run(Unknown Source)
-	at co.present.unblock.Unblock.monitor(Unblock.java:48)
-	at co.present.LogExample.main(LogExample.java:13)
+Result of example.bar blocked 8 times
+	at example.Example.lambda$main$0(Example.java:22)
+	at example.Example$$Lambda$1/51228289.run(Unknown Source)
+	at co.present.unblock.Unblock.monitor(Unblock.java:44)
+	at example.Example.main(Example.java:17)
+Result of example.foo blocked 4 times
+	at example.Example.lambda$main$0(Example.java:20)
+	at example.Example$$Lambda$1/51228289.run(Unknown Source)
+	at co.present.unblock.Unblock.monitor(Unblock.java:44)
+	at example.Example.main(Example.java:17)
 ```
 
 Google App Engine will automatically send you a notification that the error occurred.
 
-### Requirements
+### Dependencies
 
-Present Unblock was designed for use with Google App Engine, but it doesn't depend on App Engine
-and can be used in any app that wants to monitor whether or not `Future`s returned by an interface 
-block.
-
-Unblock currently requires Java 8. Let us know if you'd like us to support Java 7.
+- App Engine
+- Java 8
 
 ## Installation
 
@@ -70,20 +67,9 @@ Add the servlet filter to your `web.xml`:
 
 ```
 
-### 3. Proxy remote services.
+### 3. Install the monitor.
 
-Unblock intercepts and monitors methods that return `Future`. For example, you can configure 
-[Objectify](https://github.com/objectify/objectify) to monitor datastore operations:
-
-```java
-ObjectifyService.setFactory(new ObjectifyFactory() {
-  @Override public AsyncDatastoreService createAsyncDatastoreService(DatastoreServiceConfig cfg,
-      boolean globalCache) {
-    return Unblock.proxy(AsyncDatastoreService.class, super.createAsyncDatastoreService(cfg, globalCache));
-  }
-});
-
-```
+Call `Unblock.install()` once at startup to hook App Engine's remote API calls.
 
 ### 4. Run your app.
 
