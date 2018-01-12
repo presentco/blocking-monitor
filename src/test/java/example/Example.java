@@ -11,6 +11,8 @@ import java.util.concurrent.TimeoutException;
 public class Example {
 
   public static void main(String[] args) throws ExecutionException, InterruptedException {
+    System.setProperty(Unblock.class.getName() + ".ERROR_THRESHOLD", "10");
+
     ApiProxy.setDelegate(new FakeDelegate());
     Unblock.install();
     ApiProxy.Delegate delegate = ApiProxy.getDelegate();
@@ -47,6 +49,7 @@ public class Example {
     }
 
     @Override public byte[] get() throws InterruptedException, ExecutionException {
+      Thread.sleep(100);
       return null;
     }
 

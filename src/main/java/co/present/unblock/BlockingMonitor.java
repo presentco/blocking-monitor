@@ -1,12 +1,12 @@
 package co.present.unblock;
 
-import com.google.common.collect.HashMultiset;
-import com.google.common.collect.Multiset;
-import com.google.common.collect.Multisets;
-import com.google.common.util.concurrent.ForwardingFuture;
+import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -26,9 +26,10 @@ import static co.present.unblock.Unblock.logger;
  */
 class BlockingMonitor {
 
-  private static final int WARN_THRESHOLD = Unblock.ERROR_THRESHOLD * 2 / 3;
-
   private static final int MAX_STACK_DEPTH = 10;
+
+  /** Maximum time in ms calls can block before we log an error. */
+  long deadline = Unblock.DEFAULT_DEADLINE;
 
   /** Describes the context of this monitor. */
   private final String description;
@@ -55,37 +56,60 @@ class BlockingMonitor {
       logger.fine("No asynchronous calls were intercepted.");
     } else {
       int totalBlocks = blockedCalls.size();
+      long totalDuration = blockedCalls.stream().mapToLong(BlockedCall::duration).sum();
       StringBuilder builder = new StringBuilder()
           .append(totalBlocks)
           .append(" of ")
           .append(totalCalls)
           .append(" (")
           .append(100 * totalBlocks / totalCalls)
-          .append("%) async calls blocked in '")
+          .append("%) async calls blocked for ")
+          .append(totalDuration)
+          .append("ms total during '")
           .append(this.description)
           .append("'.");
       if (this.ignored > 0) {
         builder.append(" Ignored ").append(ignored).append(" blocking calls.");
       }
-      int blockCount = blockedCalls.size();
-      Level level = blockCount > Unblock.ERROR_THRESHOLD ? Level.SEVERE
-          : blockCount > WARN_THRESHOLD ? Level.WARNING : Level.INFO;
+      long warnDeadline = this.deadline * 2 / 3;
+      Level level = totalDuration > this.deadline ? Level.SEVERE
+          : totalDuration > warnDeadline ? Level.WARNING : Level.INFO;
       // If FINE logging is enabled, we always include the stacktrace.
       if (logger.isLoggable(Level.FINE) || level.intValue() > Level.INFO.intValue()) {
         builder.append('\n');
-        // De-duplicate stacktraces and sort them by frequency.
-        Multiset<BlockedCall> sorted = Multisets.copyHighestCountFirst(
-            HashMultiset.create(blockedCalls));
-        for (Multiset.Entry<BlockedCall> entry : sorted.entrySet()) {
-          int count = entry.getCount();
-          BlockedCall call = entry.getElement();
+
+        // De-duplicate stacktraces. Can't use Multimap here—it hashes values, too.
+        Map<BlockedCall, List<BlockedCall>> indexed = new HashMap<>();
+        for (BlockedCall call : blockedCalls) {
+          List<BlockedCall> all = indexed.computeIfAbsent(call, k -> new ArrayList<>());
+          all.add(call);
+        }
+
+        // Count duplicate calls and sum durations. Store results in the key call.
+        for (Map.Entry<BlockedCall, List<BlockedCall>> entry : indexed.entrySet()) {
+          BlockedCall key = entry.getKey();
+          Collection<BlockedCall> all = entry.getValue();
+          key.count = all.size();
+          key.duration = all.stream().mapToLong(BlockedCall::duration).sum();
+          all.clear(); // Free duplicate calls for GC.
+        }
+
+        // Sort key calls by duration.
+        List<BlockedCall> sorted = indexed.keySet().stream()
+            .sorted((a, b) -> Long.compare(b.duration(), a.duration()))
+            .collect(Collectors.toList());
+
+        for (BlockedCall call : sorted) {
           builder.append("Result of ")
               .append(call.method)
               .append(" blocked ")
-              .append(count)
-              .append(count == 1 ? " time" : " times")
+              .append(call.count)
+              .append(call.count == 1 ? " time" : " times")
+              .append(" for ")
+              .append(call.duration)
+              .append("ms total")
               .append('\n');
-          for (String element : call.stack()) {
+          for (String element : call.stack) {
             builder.append("\tat ").append(element).append('\n');
           }
         }
@@ -102,38 +126,41 @@ class BlockingMonitor {
 
   static final ThreadLocal<BlockingMonitor> localMonitor = new ThreadLocal<>();
 
-  private static class BlockedCall {
+  private static class BlockedCall implements Closeable {
 
     private final String method;
-    private final Throwable throwable;
+    private final List<String> stack;
+    private final int hash;
+
+    /** Duration and frequency of the call[s]. Ignored by equals and hashcode */
+    private final long start = System.currentTimeMillis();
+    private long duration;
+    private int count;
 
     private BlockedCall(String method, Throwable throwable) {
       this.method = method;
-      this.throwable = throwable;
+
+      // Go ahead and realize the stack here. We're blocked anyway.
+      this.stack = truncate(throwable.getStackTrace());
+      this.hash = this.method.hashCode() * 31 + this.stack.hashCode();
     }
 
-    private List<String> stack;
-    private int hash;
+    private long duration() {
+      return this.duration;
+    }
 
-    private List<String> stack() {
-      if (this.stack == null) {
-        this.stack = truncate(this.throwable.getStackTrace());
-        this.hash = this.method.hashCode() * 31 + this.stack.hashCode();
-      }
-      return this.stack;
+    @Override public void close() {
+      this.duration = System.currentTimeMillis() - start;
     }
 
     @Override public int hashCode() {
-      stack(); // computes hash
       return this.hash;
     }
 
     @Override public boolean equals(Object o) {
       BlockedCall other = (BlockedCall) o;
-      List<String> thisStack = this.stack();
-      List<String> otherStack = other.stack();
       return this.method.equals(other.method) && this.hash == other.hash
-          && thisStack.equals(otherStack);
+          && this.stack.equals(other.stack);
     }
   }
 
@@ -142,9 +169,11 @@ class BlockingMonitor {
     int skip = 0;
     while (skip < full.length) {
       String clazz = full[skip].getClassName();
-      if (clazz.startsWith("co.present.unblock")
-          || clazz.startsWith("com.google")
-          || clazz.startsWith("com.googlecode.objectify")) {
+      if (clazz.startsWith("co.present.unblock.")
+          || clazz.startsWith("sun.")
+          || clazz.startsWith("com.sun.")
+          || clazz.startsWith("com.google.")
+          || clazz.startsWith("com.googlecode.objectify.")) {
         skip++;
       } else {
         break;
@@ -157,7 +186,7 @@ class BlockingMonitor {
         .collect(Collectors.toList());
   }
 
-  static class MonitoringFuture<T> extends ForwardingFuture<T> {
+  static class MonitoringFuture<T> implements Future<T> {
 
     private final Future<T> delegate;
     private final String method;
@@ -167,32 +196,45 @@ class BlockingMonitor {
       this.method = method;
     }
 
-    @Override protected Future<T> delegate() {
-      return this.delegate;
-    }
-
     @Override public T get() throws InterruptedException, ExecutionException {
-      checkDone();
-      return super.get();
+      try (BlockedCall call = checkDone()) {
+        return delegate.get();
+      }
     }
 
     @Override public T get(long timeout, TimeUnit unit) throws InterruptedException,
         ExecutionException, TimeoutException {
-      checkDone();
-      return super.get(timeout, unit);
+      try (BlockedCall call = checkDone()) {
+        return delegate.get(timeout, unit);
+      }
     }
 
-    private void checkDone() {
+    private BlockedCall checkDone() {
       BlockingMonitor monitor = localMonitor.get();
-      if (monitor == null) return;
+      if (monitor == null) return null;
       monitor.totalCalls++;
       if (!isDone()) {
         if (monitor.disabled) {
           monitor.ignored++;
         } else {
-          monitor.blockedCalls.add(new BlockedCall(method, new Throwable()));
+          BlockedCall call = new BlockedCall(method, new Throwable());
+          monitor.blockedCalls.add(call);
+          return call;
         }
       }
+      return null;
+    }
+
+    @Override public boolean cancel(boolean mayInterruptIfRunning) {
+      return delegate.cancel(mayInterruptIfRunning);
+    }
+
+    @Override public boolean isCancelled() {
+      return delegate.isCancelled();
+    }
+
+    @Override public boolean isDone() {
+      return delegate.isDone();
     }
   }
 }
