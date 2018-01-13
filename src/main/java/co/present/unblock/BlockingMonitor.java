@@ -26,7 +26,11 @@ import static co.present.unblock.Unblock.logger;
  */
 class BlockingMonitor {
 
+  /** Maximum number of stack trace elements to consider. */
   private static final int MAX_STACK_DEPTH = 10;
+
+  /** We only print stacktraces when the total duration exceeds this minimum. */
+  private static final int MINIMUM_DURATION = 50;
 
   /** Maximum time in ms calls can block before we log an error. */
   long deadline = Unblock.DEFAULT_DEADLINE;
@@ -71,11 +75,10 @@ class BlockingMonitor {
       if (this.ignored > 0) {
         builder.append(" Ignored ").append(ignored).append(" blocking calls.");
       }
-      long warnDeadline = this.deadline * 2 / 3;
-      Level level = totalDuration > this.deadline ? Level.SEVERE
-          : totalDuration > warnDeadline ? Level.WARNING : Level.INFO;
-      // If FINE logging is enabled, we always include the stacktrace.
-      if (logger.isLoggable(Level.FINE) || level.intValue() > Level.INFO.intValue()) {
+      Level level = totalDuration > this.deadline ? Level.WARNING : Level.INFO;
+      // If FINE logging is enabled, we print all stacktraces.
+      boolean debug = logger.isLoggable(Level.FINE);
+      if (debug || level.intValue() > Level.INFO.intValue()) {
         builder.append('\n');
 
         // De-duplicate stacktraces. Can't use Multimap here—it hashes values, too.
@@ -96,6 +99,7 @@ class BlockingMonitor {
 
         // Sort key calls by duration.
         List<BlockedCall> sorted = indexed.keySet().stream()
+            .filter(call -> debug || call.duration > MINIMUM_DURATION)
             .sorted((a, b) -> Long.compare(b.duration(), a.duration()))
             .collect(Collectors.toList());
 

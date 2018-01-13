@@ -6,7 +6,7 @@ trips over the network. Anyone who has developed an App Engine app can tell you 
 operations before they become a problem is hard enough, let alone pinpointing their cause and fixing 
 them. *Present Unblock* makes it easy!
 
-Present Unblock intercepts calls to remote services (like Google Cloud Datastore) and logs an error 
+Present Unblock intercepts calls to remote services (like Google Cloud Datastore) and logs a warning
 when the total duration of blocking calls exceeds the deadline during a request. Unblock surfaces 
 problems  early (at development time) and even points you to the code most likely at fault!
 
@@ -14,7 +14,7 @@ For example, if the total duration of remote calls that block during a request e
 Unblock will log a message like this:
 
 ```
-SEVERE: 12 of 12 (100%) async calls blocked for 1250ms total during 'Example'.
+WARNING: 12 of 12 (100%) async calls blocked for 1250ms total during 'Example'.
 Result of example.bar blocked 8 times for 826ms total
 	at example.Example.lambda$main$0(Example.java:24)
 	at example.Example$$Lambda$1/1338668845.run(Unknown Source)
@@ -26,8 +26,6 @@ Result of example.foo blocked 4 times for 424ms total
 	at co.present.unblock.Unblock.monitor(Unblock.java:42)
 	at example.Example.main(Example.java:19)
 ```
-
-Google App Engine will automatically send you a notification that the error occurred.
 
 ### Dependencies
 
@@ -78,16 +76,15 @@ caching, making better use of asynchronous and batch APIs, etc..
 
 ### Optional: Configuring the Error Threshold
 
-By default, Unblock logs an error after calls block for 750ms during a request. You can
+By default, Unblock a warning after calls block for 500ms during a request. You can
 override this value with a system property. For example, in `appengine-web.xml`:
 
 ```xml
 <system-properties>
-  <property name="co.present.unblock.defaultDeadline" value="750"/>
+  <property name="co.present.unblock.defaultDeadline" value="500"/>
 </system-properties>
 ```
 
-Unblock logs a warning when you exceed 2/3rds of the error deadline (500ms by default). To always 
-log stacktraces for blocking calls, enable the FINE logging level.
+To log all stacktraces for blocking calls, enable the FINE logging level.
 
 License: [Apache 2.0](http://www.apache.org/licenses/LICENSE-2.0.txt). 

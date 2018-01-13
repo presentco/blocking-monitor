@@ -15,7 +15,7 @@ public class Example {
     Unblock.install();
     ApiProxy.Delegate delegate = ApiProxy.getDelegate();
     Unblock.monitor("Example", () -> {
-      for (int i = 0; i < 4; i++) {
+      for (int i = 0; i < 2; i++) {
         try {
           delegate.makeAsyncCall(null, "example", "foo", null, null).get();
           for (int ii = 0; ii < 2; ii++) {

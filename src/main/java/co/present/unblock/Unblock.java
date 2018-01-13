@@ -15,7 +15,7 @@ public class Unblock {
   static final Logger logger = Logger.getLogger(BlockingMonitor.class.getName());
 
   static final int DEFAULT_DEADLINE = Integer.parseInt(System.getProperty(
-      "co.present.unblock.defaultDeadline", "750"));
+      "co.present.unblock.defaultDeadline", "500"));
 
   private Unblock() {}
 
