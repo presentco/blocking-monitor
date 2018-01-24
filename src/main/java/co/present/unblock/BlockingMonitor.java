@@ -174,6 +174,7 @@ class BlockingMonitor {
     while (skip < full.length) {
       String clazz = full[skip].getClassName();
       if (clazz.startsWith("co.present.unblock.")
+          || clazz.startsWith("java.")
           || clazz.startsWith("sun.")
           || clazz.startsWith("com.sun.")
           || clazz.startsWith("com.google.")
